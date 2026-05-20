@@ -11,14 +11,15 @@ use Illuminate\Support\Facades\DB;
 
 class TransactionController extends Controller
 {
+    // ── POST /transactions ────────────────────────────────────────────────────
     public function store(Request $request)
     {
         $request->validate([
-            'items'          => 'required|array|min:1',
+            'items'              => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.quantity'   => 'required|integer|min:1',
-            'paid_amount'    => 'required|numeric|min:0',
-            'payment_method' => 'required|in:cash,qris',
+            'paid_amount'        => 'required|numeric|min:0',
+            'payment_method'     => 'required|in:cash,qris',
         ]);
 
         DB::beginTransaction();
@@ -37,8 +38,8 @@ class TransactionController extends Controller
                     ], 422);
                 }
 
-                $subtotal      = $product->price * $item['quantity'];
-                $totalAmount  += $subtotal;
+                $subtotal     = $product->price * $item['quantity'];
+                $totalAmount += $subtotal;
 
                 $itemsData[] = [
                     'product_id' => $product->id,
@@ -96,13 +97,24 @@ class TransactionController extends Controller
         }
     }
 
+    // ── GET /transactions/history ─────────────────────────────────────────────
+    // Admin  → semua transaksi (tanpa batas)
+    // Kasir  → hanya milik sendiri, maksimal 100 terakhir
     public function history(Request $request)
     {
-        $transactions = Transaction::with('items.product')
-            ->where('user_id', $request->user()->id)
-            ->orderBy('created_at', 'desc')
-            ->take(20)
-            ->get();
+        $user  = $request->user();
+        $query = Transaction::with('items.product')
+                            ->orderBy('created_at', 'desc');
+
+        if ($user->role === 'admin') {
+            // Admin: semua transaksi, sertakan info kasir
+            $query->with('user:id,name,nip');
+        } else {
+            // Kasir: hanya transaksi milik sendiri
+            $query->where('user_id', $user->id)->take(100);
+        }
+
+        $transactions = $query->get();
 
         return response()->json([
             'success' => true,
