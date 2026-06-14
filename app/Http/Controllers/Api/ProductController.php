@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\ProductUpdated;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use Illuminate\Http\Request;
@@ -15,7 +16,6 @@ class ProductController extends Controller
     {
         $query = Product::where('is_active', true);
 
-        // FIX: Wrap search in a closure so it doesn't break the is_active filter
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
@@ -58,13 +58,13 @@ class ProductController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'name'     => 'required|string|max:255',
-            'price'    => 'required|numeric|min:0',
-            'stock'    => 'required|integer|min:0',
-            'category' => 'required|string|max:100',
-            'sku'      => 'nullable|string|max:100|unique:products,sku',
+            'name'        => 'required|string|max:255',
+            'price'       => 'required|numeric|min:0',
+            'stock'       => 'required|integer|min:0',
+            'category'    => 'required|string|max:100',
+            'sku'         => 'nullable|string|max:100|unique:products,sku',
             'description' => 'nullable|string',
-            'image'    => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+            'image'       => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
         $data = [
@@ -82,6 +82,9 @@ class ProductController extends Controller
         }
 
         $product = Product::create($data);
+
+        // ── Broadcast ─────────────────────────────────────────────────────────
+        broadcast(new ProductUpdated($product, 'created'))->toOthers();
 
         return response()->json([
             'success' => true,
@@ -103,19 +106,18 @@ class ProductController extends Controller
         }
 
         $request->validate([
-            'name'     => 'sometimes|required|string|max:255',
-            'price'    => 'sometimes|required|numeric|min:0',
-            'stock'    => 'sometimes|required|integer|min:0',
-            'category' => 'sometimes|required|string|max:100',
-            'sku'      => 'nullable|string|max:100|unique:products,sku,' . $id,
+            'name'        => 'sometimes|required|string|max:255',
+            'price'       => 'sometimes|required|numeric|min:0',
+            'stock'       => 'sometimes|required|integer|min:0',
+            'category'    => 'sometimes|required|string|max:100',
+            'sku'         => 'nullable|string|max:100|unique:products,sku,' . $id,
             'description' => 'nullable|string',
-            'image'    => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+            'image'       => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
         $data = $request->only(['name', 'price', 'stock', 'category', 'sku', 'description']);
 
         if ($request->hasFile('image')) {
-            // Hapus gambar lama jika ada
             if ($product->image) {
                 $this->deleteImage($product->image);
             }
@@ -123,6 +125,9 @@ class ProductController extends Controller
         }
 
         $product->update($data);
+
+        // ── Broadcast ─────────────────────────────────────────────────────────
+        broadcast(new ProductUpdated($product->fresh(), 'updated'))->toOthers();
 
         return response()->json([
             'success' => true,
@@ -143,8 +148,10 @@ class ProductController extends Controller
             ], 404);
         }
 
-        // Soft delete: set is_active = false, bukan hapus permanen
         $product->update(['is_active' => false]);
+
+        // ── Broadcast ─────────────────────────────────────────────────────────
+        broadcast(new ProductUpdated($product, 'deleted'))->toOthers();
 
         return response()->json([
             'success' => true,
@@ -163,7 +170,6 @@ class ProductController extends Controller
     // ── Helper: Delete Image ──────────────────────────────────────────────────
     private function deleteImage(string $imageUrl): void
     {
-        // Ekstrak path relatif dari URL (hapus base URL + /storage/)
         $relativePath = ltrim(str_replace(url('/storage'), '', $imageUrl), '/');
         if (Storage::disk('public')->exists($relativePath)) {
             Storage::disk('public')->delete($relativePath);

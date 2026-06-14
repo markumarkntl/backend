@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\TransactionCreated;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\Transaction;
@@ -75,6 +76,9 @@ class TransactionController extends Controller
 
             DB::commit();
 
+            // ── Broadcast event ke semua client realtime ──────────────────────
+            broadcast(new TransactionCreated($transaction, $request->user()->name))->toOthers();
+
             return response()->json([
                 'success' => true,
                 'message' => 'Transaksi berhasil.',
@@ -98,8 +102,6 @@ class TransactionController extends Controller
     }
 
     // ── GET /transactions/history ─────────────────────────────────────────────
-    // Admin  → semua transaksi (tanpa batas)
-    // Kasir  → hanya milik sendiri, maksimal 100 terakhir
     public function history(Request $request)
     {
         $user  = $request->user();
@@ -107,10 +109,8 @@ class TransactionController extends Controller
                             ->orderBy('created_at', 'desc');
 
         if ($user->role === 'admin') {
-            // Admin: semua transaksi, sertakan info kasir
             $query->with('user:id,name,nip');
         } else {
-            // Kasir: hanya transaksi milik sendiri
             $query->where('user_id', $user->id)->take(100);
         }
 
